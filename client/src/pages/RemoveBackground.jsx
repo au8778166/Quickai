@@ -1,6 +1,10 @@
 import React, { useState } from 'react'
 import { Edit, Edit2, Eraser, Hash, Sparkles } from 'lucide-react'
+import axios from 'axios'
+import { useAuth } from '@clerk/clerk-react';
+import toast from 'react-hot-toast';
 
+axios.defaults.baseURL = import.meta.env.VITE_BASE_URL;
 const RemoveBackground = () => {
 
   const [input, setInput] = useState('')
