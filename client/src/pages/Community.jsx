@@ -1,14 +1,51 @@
-import { useUser } from '@clerk/clerk-react'
+import { useAuth, useUser } from '@clerk/clerk-react'
 import React, { useEffect, useState } from 'react'
 import { dummyPublishedCreationData } from '../assets/assets'
 import { Heart } from 'lucide-react'
+import axios from 'axios'
+import toast from "react-hot-toast";
+
+axios.defaults.baseURL = import.meta.env.VITE_BASE_URL
 
 const Community = () => {
   const [creations, setCreations] = useState([])
   const { user } = useUser()
+   const [loading, setLoading] = useState(true);
+   const [content, setContent] = useState("");
+   const { getToken } = useAuth();
 
   const fetchCreations = async () => {
-    setCreations(dummyPublishedCreationData)
+   try {
+    const {data} = await axios.get('/api/user/get-published-creations',
+      {headers: {Authorization: `Bearer ${await getToken()} `}}
+    )
+    if(data.success){
+      setCreations(data.creations)
+    }else{
+      toast.error(data.message)
+    }
+   } catch (error) {
+    toast.error(error.message)
+   }
+   setLoading(false)
+  }
+
+  const imageLikeToggle = async(id)=>{
+     try {
+      const {data} = await axios.post('/api/user/toggle-like-creation',{id},
+        {headers: {Authorization: `Bearer ${await getToken()}`}}
+      )
+      if(data.success){
+        toast.success(data.message)
+        await fetchCreations()
+      }else{
+        toast.error(data.message)
+      }
+
+        
+     } catch (error) {
+      toast.error(error.message)
+     }
   }
 
   useEffect(() => {
@@ -47,7 +84,7 @@ const Community = () => {
 
                 <div className="flex gap-1 items-center text-white">
                   <p>{creation.likes?.length || 0}</p>
-                  <Heart
+                  <Heart onClick={()=> imageLikeToggle(creation.id)}
                     className={`min-w-5 h-5 hover:scale-110 cursor-pointer transition 
                       ${
                         creation.likes?.includes(user?.id)
