@@ -6,13 +6,9 @@ import {v2 as cloudinary} from 'cloudinary'
 import FormData from 'form-data';
 import fs from 'fs'
 import { createRequire } from "module";
+import streamifier from "streamifier";
 const require = createRequire(import.meta.url);
 const pdf = require("pdf-parse");
-
-
-
-
-
 
 const AI = new OpenAI({
     apiKey: process.env.GEMINI_API_KEY,
@@ -74,7 +70,6 @@ export const generateBlogTitle = async (req, res)=>{
         if(plan !== 'premium' && free_usage >= 10)
         {
             return res.json({success: false, message: "Limit reached, Upgrade to continue."})
-
         }
         const response = await AI.chat.completions.create({
             model: "gemini-2.0-flash",
@@ -178,104 +173,126 @@ export const generateImage = async (req, res) => {
   export const removeImageBackground = async (req, res) => {
     try {
       const { userId } = req.auth();
-      const { image } = req.file;
       const plan = req.plan;
   
-      // Validate prompt
-     
+      // access file from req.file, NOT req.file.image
+      const file = req.file;
   
-      // Check subscription
-      if (plan !== 'premium') {
+      if (!file) {
+        return res.json({ success: false, message: "No image received" });
+      }
+  
+      if (plan !== "premium") {
         return res.json({
           success: false,
-          message: "This feature is only available for premium subscriptions."
+          message: "This feature is only available for premium subscriptions.",
         });
       }
   
-      
-      // Upload to Cloudinary
-      let secure_url;
-      try {
-        const cloudRes = await cloudinary.uploader.upload(image.path,{
-            transformation:[
+      // ✅ Cloudinary upload using buffer + background removal
+      const result = await new Promise((resolve, reject) => {
+        cloudinary.uploader
+          .upload_stream(
+            {
+              folder: "ai-remove-bg",
+              resource_type: "image",
+              transformation: [
                 {
-                    effect: 'background_removal',
-                    background_removal: 'remove_the_background'
-                }
-            ]
-        });
-        secure_url = cloudRes.secure_url;
-      } catch (err) {
-        console.error("Cloudinary upload failed:", err.message);
-        return res.json({ success: false, message: "Image upload failed." });
-      }
+                  effect: "background_removal",
+                  background_removal: "remove_the_background",
+                },
+              ],
+            },
+            (error, result) => {
+              if (error) return reject(error);
+              resolve(result);
+            }
+          )
+          .end(file.buffer); // ✅ This sends the image buffer to cloudinary
+      });
   
-      // Store image in database
+      // Save in DB
       await sql`
-        INSERT INTO creations (user_id, prompt, content, type)
-        VALUES (${userId}, 'Rempve background from image', ${secure_url}, 'image') `;
+          INSERT INTO creations (user_id, prompt, content, type)
+          VALUES (${userId}, 'Remove background from image', ${result.secure_url}, 'image')`;
   
-      // Respond with image URL
-      res.json({ success: true, content: secure_url });
-  
+      return res.json({
+        success: true,
+        content: result.secure_url,
+      });
     } catch (error) {
-      console.error("❌ generateImage error:", error.message);
-      res.json({ success: false, message: error?.message || "Unexpected error occurred." });
+      console.error("❌ Background removal error:", error);
+      return res.json({
+        success: false,
+        message: error.message || "Unexpected error",
+      });
     }
   };
+  
 
+ 
+export const removeImageObject = async (req, res) => {
+  try {
+    const { userId } = req.auth();
+    const { object } = req.body;
+    const image = req.file;
+    const plan = req.plan;
 
+    if (plan !== "premium") {
+      return res.json({
+        success: false,
+        message: "This feature is only available for premium subscriptions."
+      });
+    }
 
+    if (!image) {
+      return res.json({
+        success: false,
+        message: "No file received. Use multipart/form-data."
+      });
+    }
 
+    let public_id;
 
-  export const removeImageObject = async (req, res) => {
+    // ✅ Cloudinary upload using memoryStorage buffer
     try {
-      const { userId } = req.auth();
-      const { object  } = req.body;
-      const { image } = req.file;
-      const plan = req.plan;
-  
-  
-      // Check subscription
-      if (plan !== 'premium') {
-        return res.json({
-          success: false,
-          message: "This feature is only available for premium subscriptions."
-        });
-      }
-  
-      
-      // Upload to Cloudinary
-     
-      try {
-        const cloudRes = await cloudinary.uploader.upload(image.path);
-        const public_id = cloudRes.secure_url;
-      } catch (err) {
-        console.error("Cloudinary upload failed:", err.message);
-        return res.json({ success: false, message: "Image upload failed." });
-      }
+      const cloudRes = await new Promise((resolve, reject) => {
+        const upload = cloudinary.uploader.upload_stream(
+          { folder: "remove-object" },
+          (err, result) => {
+            if (err) reject(err);
+            else resolve(result);
+          }
+        );
 
-     const imageUrl =  cloudinary.url(public_id, {
-        transformation: [{effect:`gen_remove:${object}`}],
-        resource_type: 'image'
-      })
-  
-      // Store image in database
-      await sql`
-        INSERT INTO creations (user_id, prompt, content, type)
-        VALUES (${userId}, ${`Removed ${object} from image`}, ${imageUrl}, 'image') `;
-  
-      // Respond with image URL
-      res.json({ success: true, content: imageUrl });
-  
-    } catch (error) {
-      console.error("❌ generateImage error:", error.message);
-      res.json({ success: false, message: error?.message || "Unexpected error occurred." });
+        streamifier.createReadStream(image.buffer).pipe(upload);
+      });
+
+      public_id = cloudRes.public_id; // ✅ correct
+    } catch (err) {
+      console.error("Cloudinary upload failed:", err.message);
+      return res.json({ success: false, message: "Image upload failed." });
     }
-  };
 
+    // ✅ Generate AI transformed URL
+    const imageUrl = cloudinary.url(public_id, {
+      transformation: [{ effect: `gen_remove:${object}` }],
+      resource_type: "image"
+    });
 
+    // ✅ Save to DB
+    await sql`
+      INSERT INTO creations (user_id, prompt, content, type)
+      VALUES (${userId}, ${`Removed ${object} from image`}, ${imageUrl}, 'image')
+    `;
 
+    res.json({ success: true, content: imageUrl });
+
+  } catch (error) {
+    console.error("❌ generateImage error:", error.message);
+    res.json({ success: false, message: error.message || "Unexpected error occurred." });
+  }
+};
 
 
   export const resumeReview = async (req, res) => {
@@ -283,8 +300,6 @@ export const generateImage = async (req, res) => {
       const { userId } = req.auth();
       const resume = req.file;
       const plan = req.plan;
-  
-  
       // Check subscription
       if (plan !== 'premium') {
         return res.json({
