@@ -11,9 +11,15 @@ const require = createRequire(import.meta.url);
 import * as pdfjsLib from "pdfjs-dist/legacy/build/pdf.mjs";
 
 const AI = new OpenAI({
-  apiKey: process.env.GEMINI_API_KEY,
-  baseURL: "https://generativelanguage.googleapis.com/v1beta/openai/"
+  apiKey: process.env.OPENROUTER_API_KEY,
+  baseURL: "https://openrouter.ai/api/v1",
+  defaultHeaders: {
+    "HTTP-Referer": "http://localhost:5173", // Change to your frontend URL
+    "X-Title": "AI SaaS",
+  },
 });
+
+const MODEL = process.env.OPENROUTER_MODEL || "openai/gpt-4o";
 
 export const generateArticle = async (req, res) => {
   try {
@@ -23,12 +29,20 @@ export const generateArticle = async (req, res) => {
     const free_usage = req.free_usage;
 
     if (plan !== "premium" && free_usage >= 10) {
-      return res.json({ success: false, message: "Limit reached, Upgrade to continue." });
+      return res.json({
+        success: false,
+        message: "Limit reached, Upgrade to continue.",
+      });
     }
 
     const response = await AI.chat.completions.create({
-      model: "gemini-2.0-flash",
-      messages: [{ role: "user", content: prompt }],
+      model: MODEL,
+      messages: [
+        {
+          role: "user",
+          content: prompt,
+        },
+      ],
       temperature: 0.7,
       max_tokens: length,
     });
@@ -42,7 +56,7 @@ export const generateArticle = async (req, res) => {
 
     if (plan !== "premium") {
       await clerkClient.users.updateUserMetadata(userId, {
-        privateMetadata: { free_usage: free_usage + 1 }
+        privateMetadata: { free_usage: free_usage + 1 },
       });
     }
 
@@ -63,13 +77,18 @@ export const generateBlogTitle = async (req, res) => {
     if (plan !== "premium" && free_usage >= 10) {
       return res.json({
         success: false,
-        message: "Limit reached, Upgrade to continue."
+        message: "Limit reached, Upgrade to continue.",
       });
     }
 
     const response = await AI.chat.completions.create({
-      model: "gemini-2.0-flash",
-      messages: [{ role: "user", content: prompt }],
+      model: MODEL,
+      messages: [
+        {
+          role: "user",
+          content: prompt,
+        },
+      ],
       temperature: 0.7,
       max_tokens: 100,
     });
@@ -83,7 +102,7 @@ export const generateBlogTitle = async (req, res) => {
 
     if (plan !== "premium") {
       await clerkClient.users.updateUserMetadata(userId, {
-        privateMetadata: { free_usage: free_usage + 1 }
+        privateMetadata: { free_usage: free_usage + 1 },
       });
     }
 
@@ -101,13 +120,16 @@ export const generateImage = async (req, res) => {
     const plan = req.plan;
 
     if (!prompt || typeof prompt !== "string" || prompt.trim().length < 5) {
-      return res.json({ success: false, message: "Invalid prompt for image generation." });
+      return res.json({
+        success: false,
+        message: "Invalid prompt for image generation.",
+      });
     }
 
     if (plan !== "premium") {
       return res.json({
         success: false,
-        message: "This feature is only available for premium subscriptions."
+        message: "This feature is only available for premium subscriptions.",
       });
     }
 
@@ -119,13 +141,13 @@ export const generateImage = async (req, res) => {
       formData,
       {
         headers: { "x-api-key": process.env.CLIPDROP_API_KEY },
-        responseType: "arraybuffer"
-      }
+        responseType: "arraybuffer",
+      },
     );
 
     const base64Image = `data:image/png;base64,${Buffer.from(
       clipdropRes.data,
-      "binary"
+      "binary",
     ).toString("base64")}`;
 
     const cloudRes = await cloudinary.uploader.upload(base64Image);
@@ -149,12 +171,13 @@ export const removeImageBackground = async (req, res) => {
     const plan = req.plan;
     const file = req.file;
 
-    if (!file) return res.json({ success: false, message: "No image received" });
+    if (!file)
+      return res.json({ success: false, message: "No image received" });
 
     if (plan !== "premium") {
       return res.json({
         success: false,
-        message: "This feature is only available for premium subscriptions."
+        message: "This feature is only available for premium subscriptions.",
       });
     }
 
@@ -174,7 +197,7 @@ export const removeImageBackground = async (req, res) => {
           (error, result) => {
             if (error) return reject(error);
             resolve(result);
-          }
+          },
         )
         .end(file.buffer);
     });
@@ -201,7 +224,7 @@ export const removeImageObject = async (req, res) => {
     if (plan !== "premium") {
       return res.json({
         success: false,
-        message: "This feature is only available for premium subscriptions."
+        message: "This feature is only available for premium subscriptions.",
       });
     }
 
@@ -215,14 +238,14 @@ export const removeImageObject = async (req, res) => {
         (err, result) => {
           if (err) reject(err);
           else resolve(result);
-        }
+        },
       );
       streamifier.createReadStream(image.buffer).pipe(upload);
     });
 
     const imageUrl = cloudinary.url(cloudRes.public_id, {
       transformation: [{ effect: `gen_remove:${object}` }],
-      resource_type: "image"
+      resource_type: "image",
     });
 
     await sql`
@@ -247,14 +270,14 @@ export const resumeReview = async (req, res) => {
     if (plan !== "premium") {
       return res.json({
         success: false,
-        message: "This feature is only available for premium subscriptions."
+        message: "This feature is only available for premium subscriptions.",
       });
     }
 
     if (!resume) {
       return res.json({
         success: false,
-        message: "No file received. Please upload a PDF resume."
+        message: "No file received. Please upload a PDF resume.",
       });
     }
 
@@ -266,7 +289,7 @@ export const resumeReview = async (req, res) => {
     for (let i = 1; i <= pdf.numPages; i++) {
       const page = await pdf.getPage(i);
       const content = await page.getTextContent();
-      pdfText += content.items.map(item => item.str).join(" ") + "\n";
+      pdfText += content.items.map((item) => item.str).join(" ") + "\n";
     }
 
     const prompt = `
@@ -281,10 +304,14 @@ Give feedback with these sections:
 Resume Content:
 ${pdfText}
 `;
-
     const response = await AI.chat.completions.create({
-      model: "gemini-2.0-flash",
-      messages: [{ role: "user", content: prompt }],
+      model: MODEL,
+      messages: [
+        {
+          role: "user",
+          content: prompt,
+        },
+      ],
       temperature: 0.7,
       max_tokens: 1000,
     });
