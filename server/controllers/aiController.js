@@ -14,8 +14,8 @@ const AI = new OpenAI({
   apiKey: process.env.OPENROUTER_API_KEY,
   baseURL: "https://openrouter.ai/api/v1",
   defaultHeaders: {
-    "HTTP-Referer": "http://localhost:5173", // Change to your frontend URL
-    "X-Title": "AI SaaS",
+    "HTTP-Referer": process.env.FRONTEND_URL,
+    "X-Title": "QuickAI",
   },
 });
 
